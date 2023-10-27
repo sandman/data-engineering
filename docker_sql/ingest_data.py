@@ -20,11 +20,12 @@ def main(params):
 
     # Download the CSV file if it doesn't exist
     if not os.path.exists(file_path):
-        os.system(f"wget {url} -O {csv_name}.gz")
+        print(f'Downloading {csv_name} from {url}')
+        os.system(f"wget {url} -O {csv_name}")
+    else:
+        print(f'File {csv_name} exists.')
 
-    os.system(f"gunzip {csv_name}.gz")
-
-    df = pd.read_csv(csv_name, nrows=100)
+    df = pd.read_csv(file_path, nrows=100)
 
     engine = create_engine(
         f"postgresql://{user}:{password}@{host}:{port}/{database}"
