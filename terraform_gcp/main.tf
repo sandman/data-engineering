@@ -30,7 +30,7 @@ resource "google_compute_instance" "default" {
 
   metadata = {
     #User name and path to public SSH Key
-    ssh-keys = "sandip:${file("~/.ssh/id_rsa.pub")}"
+    ssh-keys = "sandip:${file("~/.ssh/gcp_rsa.pub")}"
   }
 
   network_interface {
