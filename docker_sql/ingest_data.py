@@ -4,17 +4,9 @@ from time import time
 import argparse
 import os
 import psycopg2
+from prefect import flow, task
 
-
-def main(params):
-    user = params.user
-    password = params.password
-    host = params.host
-    port = params.port
-    database = params.database
-    table = params.table
-    url = params.url
-    csv_name = params.csv_name  # "yellow_tripdata_2021-01.csv"
+def ingest_data(user, password, host, port, database, table, url, csv_name):
 
     file_path = os.path.join(os.getcwd(), csv_name)
 
@@ -113,4 +105,5 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    main(args)
+    ingest_data(args.user, args.password, args.host, args.port, args.database,
+                args.table, args.url, args.csv_name)
