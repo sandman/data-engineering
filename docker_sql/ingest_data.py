@@ -5,9 +5,12 @@ import argparse
 import os
 import psycopg2
 from prefect import flow, task
+from prefect_sqlalchemy import SqlAlchemyConnector
+from prefect.tasks import task_input_hash
+from datetime import timedelta
 
-def ingest_data(user, password, host, port, database, table, url, csv_name):
-
+@task(log_prints=True, retries=3, cache_key_fn=task_input_hash, cache_expiration=timedelta(days=1))
+def extract_data(url, csv_name):
     file_path = os.path.join(os.getcwd(), csv_name)
 
     # Download the CSV file if it doesn't exist
@@ -19,10 +22,6 @@ def ingest_data(user, password, host, port, database, table, url, csv_name):
 
     df = pd.read_csv(file_path, nrows=100)
 
-    engine = create_engine(
-        f"postgresql://{user}:{password}@{host}:{port}/{database}"
-    )
-
     chunk_size = 50000
     df_iter = pd.read_csv(csv_name, iterator=True, chunksize=chunk_size)
 
@@ -30,36 +29,29 @@ def ingest_data(user, password, host, port, database, table, url, csv_name):
 
     df.tpep_pickup_datetime = pd.to_datetime(df.tpep_pickup_datetime)
     df.tpep_dropoff_datetime = pd.to_datetime(df.tpep_dropoff_datetime)
-
-    df.head(n=0).to_sql(name=table, con=engine, if_exists="replace")
-
-    while True:
-        try:
-            t_start = time()
-
-            df = next(df_iter)
-
-            df.tpep_pickup_datetime = pd.to_datetime(df.tpep_pickup_datetime)
-            df.tpep_dropoff_datetime = pd.to_datetime(df.tpep_dropoff_datetime)
-
-            df.to_sql(name=table, con=engine, if_exists="append")
-
-            t_end = time()
-
-            print(
-                "inserted another chunk, took %.3f second" % (t_end - t_start)
-            )
-        except StopIteration:
-            break
-
-    df_zones = pd.read_csv("taxi+_zone_lookup.csv")
-
-    df_zones.head()
-
-    df_zones.to_sql(name="zones", con=engine, if_exists="replace")
+    return df
 
 
-if __name__ == "__main__":
+@task(log_prints=True)
+def transform_data(df):
+    print(f"pre:Missing passenger count: {df['passenger_count'].isin([0]).sum()}")
+    df = df[df['passenger_count'] != 0]
+    print(f"post:Missing passenger count: {df['passenger_count'].isin([0]).sum()}")
+    return df
+
+@task(log_prints=True, retries=3)
+def ingest_data(table, df):
+    database_block = SqlAlchemyConnector.load("sqlalchemy-postgres")
+    with database_block.get_connection(begin=False) as engine:
+        df.head(n=0).to_sql(name=table, con=engine, if_exists="replace")
+        df.to_sql(name=table, con=engine, if_exists="append")
+
+@flow(name="Subflow", log_prints=True)
+def log_subflow(table_name: str):
+    print(f'Logging subflow for {table_name}')
+
+@flow(name="Ingest Flow")
+def main_flow():
     parser = argparse.ArgumentParser(
         description="Ingest CSV file into PostgreSQL database using Pandas"
     )
@@ -105,5 +97,13 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
-    ingest_data(args.user, args.password, args.host, args.port, args.database,
-                args.table, args.url, args.csv_name)
+
+    log_subflow(args.table)
+    raw_data = extract_data(url=args.url, csv_name=args.csv_name)
+
+    data = transform_data(raw_data)
+
+    ingest_data(args.table, data)
+
+if __name__ == "__main__":
+    main_flow()
